@@ -31,27 +31,18 @@ app.prepare().then(() => {
         CROSSBOW: { name: 'Crossbow', type: 'contraband', value: 9, penalty: 4, color: '#f44336' }
     };
 
-    function shuffleArray(array) {
-        let currentIndex = array.length, randomIndex;
-        while (currentIndex !== 0) {
-            randomIndex = Math.floor(Math.random() * currentIndex);
-            currentIndex--;
-            [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
+    const BASE_DECK_TEMPLATE = [];
+    const _addCards = (type, count) => {
+        for (let i = 0; i < count; i++) {
+            BASE_DECK_TEMPLATE.push(CARD_TYPES[type]);
         }
-        return array;
-    }
+    };
+    _addCards('APPLE', 48); _addCards('CHEESE', 36); _addCards('BREAD', 36); _addCards('CHICKEN', 24);
+    _addCards('PEPPER', 5); _addCards('MEAD', 5); _addCards('SILK', 5); _addCards('CROSSBOW', 5);
 
-    function createDeck() {
-        const deck = [];
-        const addCards = (type, count) => {
-            for (let i = 0; i < count; i++) {
-                deck.push({ id: Math.random().toString(36).substr(2, 9), ...CARD_TYPES[type] });
-            }
-        };
-        addCards('APPLE', 48); addCards('CHEESE', 36); addCards('BREAD', 36); addCards('CHICKEN', 24);
-        addCards('PEPPER', 5); addCards('MEAD', 5); addCards('SILK', 5); addCards('CROSSBOW', 5);
-
-        return shuffleArray(deck);
+    function drawRandomCard() {
+        const template = BASE_DECK_TEMPLATE[Math.floor(Math.random() * BASE_DECK_TEMPLATE.length)];
+        return { id: Math.random().toString(36).substr(2, 9), ...template };
     }
 
     const rooms = {}; // { roomCode: { players: [{id, name, cards, coins, stand: []}], deck: [], discard: [], sheriffIndex: 0, ... } }
@@ -219,7 +210,6 @@ app.prepare().then(() => {
             const room = rooms[code];
             if (room) {
                 room.gameState = 'playing';
-                room.deck = createDeck();
                 room.discard = [];
                 room.sheriffIndex = 0;
                 room.phase = 'market';
@@ -227,7 +217,8 @@ app.prepare().then(() => {
                 room.maxRounds = room.players.length * 2; // 2 laps
 
                 room.players.forEach((p, idx) => {
-                    p.cards = room.deck.splice(0, 6);
+                    p.cards = [];
+                    for(let i = 0; i < 6; i++) p.cards.push(drawRandomCard());
                     p.hasExchanged = (idx === room.sheriffIndex);
                     p.stand = [];
                     p.coins = 50;
@@ -257,16 +248,7 @@ app.prepare().then(() => {
                     player.lastDiscarded = discardedThisTurn;
                     // Draw back to 6
                     while (player.cards.length < 6) {
-                        if (room.deck.length === 0 && room.discard.length > 0) {
-                            room.deck = shuffleArray(room.discard);
-                            room.discard = [];
-                            console.log(`Room ${code} deck reshuffled from discard pile.`);
-                        }
-                        if (room.deck.length > 0) {
-                            player.cards.push(room.deck.shift());
-                        } else {
-                            break; // Out of cards completely
-                        }
+                        player.cards.push(drawRandomCard());
                     }
                     player.hasExchanged = true;
 
@@ -545,16 +527,7 @@ app.prepare().then(() => {
                 p.bag = null;
                 // Top-up cards to 6
                 while (p.cards.length < 6) {
-                    if (room.deck.length === 0 && room.discard.length > 0) {
-                        room.deck = shuffleArray(room.discard);
-                        room.discard = [];
-                        console.log(`Room ${code} deck reshuffled from discard pile.`);
-                    }
-                    if (room.deck.length > 0) {
-                        p.cards.push(room.deck.shift());
-                    } else {
-                        break;
-                    }
+                    p.cards.push(drawRandomCard());
                 }
                 p.hasExchanged = (p.id === room.players[room.sheriffIndex].id);
                 p.lastDiscarded = [];
