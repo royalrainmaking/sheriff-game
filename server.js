@@ -31,6 +31,16 @@ app.prepare().then(() => {
         CROSSBOW: { name: 'Crossbow', type: 'contraband', value: 9, penalty: 4, color: '#f44336' }
     };
 
+    function shuffleArray(array) {
+        let currentIndex = array.length, randomIndex;
+        while (currentIndex !== 0) {
+            randomIndex = Math.floor(Math.random() * currentIndex);
+            currentIndex--;
+            [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
+        }
+        return array;
+    }
+
     function createDeck() {
         const deck = [];
         const addCards = (type, count) => {
@@ -41,13 +51,7 @@ app.prepare().then(() => {
         addCards('APPLE', 48); addCards('CHEESE', 36); addCards('BREAD', 36); addCards('CHICKEN', 24);
         addCards('PEPPER', 5); addCards('MEAD', 5); addCards('SILK', 5); addCards('CROSSBOW', 5);
 
-        let currentIndex = deck.length, randomIndex;
-        while (currentIndex !== 0) {
-            randomIndex = Math.floor(Math.random() * currentIndex);
-            currentIndex--;
-            [deck[currentIndex], deck[randomIndex]] = [deck[randomIndex], deck[currentIndex]];
-        }
-        return deck;
+        return shuffleArray(deck);
     }
 
     const rooms = {}; // { roomCode: { players: [{id, name, cards, coins, stand: []}], deck: [], discard: [], sheriffIndex: 0, ... } }
@@ -73,6 +77,9 @@ app.prepare().then(() => {
             if (rooms[code]) {
                 if (rooms[code].gameState === 'playing') {
                     return socket.emit('error', 'เกมเริ่มไปแล้ว ใช้ฟีเจอร์เชื่อมต่อใหม่แทน');
+                }
+                if (rooms[code].players.length >= 12) {
+                    return socket.emit('error', 'ห้องเต็มแล้ว (สูงสุด 12 คน)');
                 }
                 const token = Math.random().toString(36).substring(2, 14);
                 rooms[code].players.push({ id: socket.id, name, avatar, coins: 50, cards: [], stand: [], token, disconnected: false });
@@ -249,8 +256,17 @@ app.prepare().then(() => {
                     });
                     player.lastDiscarded = discardedThisTurn;
                     // Draw back to 6
-                    while (player.cards.length < 6 && room.deck.length > 0) {
-                        player.cards.push(room.deck.shift());
+                    while (player.cards.length < 6) {
+                        if (room.deck.length === 0 && room.discard.length > 0) {
+                            room.deck = shuffleArray(room.discard);
+                            room.discard = [];
+                            console.log(`Room ${code} deck reshuffled from discard pile.`);
+                        }
+                        if (room.deck.length > 0) {
+                            player.cards.push(room.deck.shift());
+                        } else {
+                            break; // Out of cards completely
+                        }
                     }
                     player.hasExchanged = true;
 
@@ -528,8 +544,17 @@ app.prepare().then(() => {
             room.players.forEach(p => {
                 p.bag = null;
                 // Top-up cards to 6
-                while (p.cards.length < 6 && room.deck.length > 0) {
-                    p.cards.push(room.deck.shift());
+                while (p.cards.length < 6) {
+                    if (room.deck.length === 0 && room.discard.length > 0) {
+                        room.deck = shuffleArray(room.discard);
+                        room.discard = [];
+                        console.log(`Room ${code} deck reshuffled from discard pile.`);
+                    }
+                    if (room.deck.length > 0) {
+                        p.cards.push(room.deck.shift());
+                    } else {
+                        break;
+                    }
                 }
                 p.hasExchanged = (p.id === room.players[room.sheriffIndex].id);
                 p.lastDiscarded = [];
