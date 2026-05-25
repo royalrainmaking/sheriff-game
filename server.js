@@ -77,7 +77,7 @@ app.prepare().then(() => {
                 const token = Math.random().toString(36).substring(2, 14);
                 rooms[code].players.push({ id: socket.id, name, avatar, coins: 50, cards: [], stand: [], token, disconnected: false });
                 socket.join(code);
-                socket.emit('player-token', { token });
+                socket.emit('player-token', { token, code });
                 io.to(code).emit('player-joined', { players: rooms[code].players, code });
                 console.log(`${name} joined room ${code}`);
             } else {
@@ -401,6 +401,7 @@ app.prepare().then(() => {
             const sheriff = room.players[room.sheriffIndex];
             room.players.forEach(p => {
                 io.to(p.id).emit('game-state-updated', {
+                    code,
                     players: room.players.map(pl => {
                         const hideCards = pl.id !== p.id;
                         return {
