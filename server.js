@@ -31,18 +31,37 @@ app.prepare().then(() => {
         CROSSBOW: { name: 'Crossbow', type: 'contraband', value: 9, penalty: 4, color: '#f44336' }
     };
 
-    const BASE_DECK_TEMPLATE = [];
-    const _addCards = (type, count) => {
-        for (let i = 0; i < count; i++) {
-            BASE_DECK_TEMPLATE.push(CARD_TYPES[type]);
-        }
-    };
-    _addCards('APPLE', 48); _addCards('CHEESE', 36); _addCards('BREAD', 36); _addCards('CHICKEN', 24);
-    _addCards('PEPPER', 5); _addCards('MEAD', 5); _addCards('SILK', 5); _addCards('CROSSBOW', 5);
+    // Build a weighted deck template based on player count
+    // Legal cards scale with players (~6 cards per player per type proportionally)
+    // Contraband maintains ~30% of total
+    function buildDeckTemplate(playerCount) {
+        const template = [];
+        // Scale legal cards: base counts × players / 5 (baseline 5 players)
+        const scale = Math.max(1, playerCount);
+        const apple   = Math.round(48 * scale / 5);
+        const cheese  = Math.round(36 * scale / 5);
+        const bread   = Math.round(36 * scale / 5);
+        const chicken = Math.round(24 * scale / 5);
+        const legalTotal = apple + cheese + bread + chicken;
+        // Contraband = 40% of total → contraband = legalTotal * 2/3, split equally among 4 types
+        const contrabandEach = Math.max(1, Math.round(legalTotal * 2 / 3 / 4));
+        for (let i = 0; i < apple;          i++) template.push(CARD_TYPES.APPLE);
+        for (let i = 0; i < cheese;         i++) template.push(CARD_TYPES.CHEESE);
+        for (let i = 0; i < bread;          i++) template.push(CARD_TYPES.BREAD);
+        for (let i = 0; i < chicken;        i++) template.push(CARD_TYPES.CHICKEN);
+        for (let i = 0; i < contrabandEach; i++) template.push(CARD_TYPES.PEPPER);
+        for (let i = 0; i < contrabandEach; i++) template.push(CARD_TYPES.MEAD);
+        for (let i = 0; i < contrabandEach; i++) template.push(CARD_TYPES.SILK);
+        for (let i = 0; i < contrabandEach; i++) template.push(CARD_TYPES.CROSSBOW);
+        const total = template.length;
+        const contrabandPct = (contrabandEach * 4 / total * 100).toFixed(1);
+        console.log(`Deck template built: ${playerCount} players, ${total} entries, ${contrabandPct}% contraband`);
+        return template;
+    }
 
-    function drawRandomCard() {
-        const template = BASE_DECK_TEMPLATE[Math.floor(Math.random() * BASE_DECK_TEMPLATE.length)];
-        return { id: Math.random().toString(36).substr(2, 9), ...template };
+    function drawRandomCard(template) {
+        const base = template[Math.floor(Math.random() * template.length)];
+        return { id: Math.random().toString(36).substr(2, 9), ...base };
     }
 
     const rooms = {}; // { roomCode: { players: [{id, name, cards, coins, stand: []}], deck: [], discard: [], sheriffIndex: 0, ... } }
@@ -215,10 +234,11 @@ app.prepare().then(() => {
                 room.phase = 'market';
                 room.round = 1;
                 room.maxRounds = room.players.length * 2; // 2 laps
+                room.deckTemplate = buildDeckTemplate(room.players.length);
 
                 room.players.forEach((p, idx) => {
                     p.cards = [];
-                    for(let i = 0; i < 6; i++) p.cards.push(drawRandomCard());
+                    for(let i = 0; i < 6; i++) p.cards.push(drawRandomCard(room.deckTemplate));
                     p.hasExchanged = (idx === room.sheriffIndex);
                     p.stand = [];
                     p.coins = 50;
@@ -248,7 +268,7 @@ app.prepare().then(() => {
                     player.lastDiscarded = discardedThisTurn;
                     // Draw back to 6
                     while (player.cards.length < 6) {
-                        player.cards.push(drawRandomCard());
+                        player.cards.push(drawRandomCard(room.deckTemplate));
                     }
                     player.hasExchanged = true;
 
@@ -527,7 +547,7 @@ app.prepare().then(() => {
                 p.bag = null;
                 // Top-up cards to 6
                 while (p.cards.length < 6) {
-                    p.cards.push(drawRandomCard());
+                    p.cards.push(drawRandomCard(room.deckTemplate));
                 }
                 p.hasExchanged = (p.id === room.players[room.sheriffIndex].id);
                 p.lastDiscarded = [];
