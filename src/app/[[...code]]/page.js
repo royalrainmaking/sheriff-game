@@ -492,7 +492,7 @@ export default function Home() {
               </div>
 
               <div style={{ textAlign: 'left', marginBottom: '30px' }}>
-                <h3 style={{ fontSize: '1rem', color: 'var(--foreground)', opacity: 0.8, marginBottom: '15px' }}>ผู้เล่น ({players.length}/6)</h3>
+                <h3 style={{ fontSize: '1rem', color: 'var(--foreground)', opacity: 0.8, marginBottom: '15px' }}>ผู้เล่น ({players.length}/12)</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   {players.map((p, i) => {
                     const isHost = players[0]?.id === socket.id;
