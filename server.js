@@ -108,20 +108,81 @@ app.prepare().then(() => {
             const isHost = room.players[0]?.id === socket.id;
 
             if (isHost) {
-                // Host leaves -> dissolve entire room
-                room.players.forEach(p => {
-                    if (p.id !== socket.id) {
-                        io.to(p.id).emit('room-dissolved', 'เจ้าของห้องออกจากห้อง ห้องถูกยุบแล้ว');
+                // Host leaves ─ during game: end game. In lobby: dissolve room
+                if (room.gameState === 'playing') {
+                    room.players = room.players.filter(p => p.id !== socket.id);
+                    if (room.players.length <= 1) {
+                        room.phase = 'game_over';
+                        room.finalScores = calculateFinalScores(room);
+                        broadcastGameState(code, room);
+                    } else {
+                        broadcastGameState(code, room);
                     }
-                });
-                delete rooms[code];
-                socket.leave(code);
-                console.log(`Room ${code} dissolved (host left)`);
+                    socket.leave(code);
+                } else {
+                    // Lobby: dissolve
+                    room.players.forEach(p => {
+                        if (p.id !== socket.id) {
+                            io.to(p.id).emit('room-dissolved', 'เจ้าของห้องออกจากห้อง ห้องถูกยุบแล้ว');
+                        }
+                    });
+                    delete rooms[code];
+                    socket.leave(code);
+                    console.log(`Room ${code} dissolved (host left)`);
+                }
             } else {
                 room.players = room.players.filter(p => p.id !== socket.id);
                 socket.leave(code);
-                io.to(code).emit('player-joined', { players: room.players, code });
+
+                if (room.players.length <= 1 && room.gameState === 'playing') {
+                    room.phase = 'game_over';
+                    room.finalScores = calculateFinalScores(room);
+                    broadcastGameState(code, room);
+                    console.log(`Room ${code} ended (only 1 player left)`);
+                } else if (room.players.length === 0) {
+                    delete rooms[code];
+                } else {
+                    if (room.gameState === 'playing') {
+                        broadcastGameState(code, room);
+                    } else {
+                        io.to(code).emit('player-joined', { players: room.players, code });
+                    }
+                }
                 console.log(`Socket ${socket.id} left room ${code}`);
+            }
+            socket.emit('left-room');
+        });
+
+        socket.on('abandon-game', ({ code, token }) => {
+            const room = rooms[code];
+            if (!room) return;
+            const playerIdx = room.players.findIndex(p => p.token === token);
+            if (playerIdx === -1) return;
+            const isHost = (playerIdx === 0);
+
+            if (isHost) {
+                room.players.forEach(p => {
+                    if (p.token !== token) {
+                        io.to(p.id).emit('room-dissolved', 'เจ้าของห้องยกเลิกการเล่น ห้องถูกยุบแล้ว');
+                    }
+                });
+                delete rooms[code];
+            } else {
+                room.players.splice(playerIdx, 1);
+
+                if (room.players.length <= 1 && room.gameState === 'playing') {
+                    room.phase = 'game_over';
+                    room.finalScores = calculateFinalScores(room);
+                    broadcastGameState(code, room);
+                } else if (room.players.length === 0) {
+                    delete rooms[code];
+                } else {
+                    if (room.gameState === 'playing') {
+                        broadcastGameState(code, room);
+                    } else {
+                        io.to(code).emit('player-joined', { players: room.players, code });
+                    }
+                }
             }
             socket.emit('left-room');
         });
@@ -193,8 +254,9 @@ app.prepare().then(() => {
                     }
                     player.hasExchanged = true;
 
-                    // If all players exchanged, move to load bag
-                    if (room.players.every(p => p.hasExchanged)) {
+                    // If all active players exchanged, move to load bag
+                    const activePlayers = room.players.filter(p => !p.disconnected);
+                    if (activePlayers.every(p => p.hasExchanged)) {
                         room.phase = 'load_bag';
                     }
 
@@ -206,9 +268,9 @@ app.prepare().then(() => {
         socket.on('declare-bag', ({ code, cardIndexes, declaredType }) => {
             console.log(`Declare bag received for ${socket.id} in ${code}:`, cardIndexes, declaredType);
             const room = rooms[code];
-            if (room) {
+            if (room && room.phase === 'load_bag') {
                 const player = room.players.find(p => p.id === socket.id);
-                if (player) {
+                if (player && !player.bag) {
                     const bagCards = [];
                     // Sort descending to safely splice from highest index to lowest
                     [...cardIndexes].sort((a, b) => b - a).forEach(idx => {
@@ -219,8 +281,10 @@ app.prepare().then(() => {
                     player.bag = { cards: bagCards, declaredGood: declaredType, declaredAmount: bagCards.length, bribe: 0 };
                     console.log(`Player ${player.name} loaded bag with ${bagCards.length} cards.`);
 
-                    // Check if all merchants have loaded their bag
-                    const allMerchantsLoaded = room.players.every(p => p.id === room.players[room.sheriffIndex].id || p.bag);
+                    // Check if all ACTIVE merchants have loaded their bag
+                    const sheriff = room.players[room.sheriffIndex];
+                    const activeMerchants = room.players.filter(p => p.id !== sheriff.id && !p.disconnected);
+                    const allMerchantsLoaded = activeMerchants.every(p => p.bag);
                     if (allMerchantsLoaded) {
                         room.phase = 'inspection';
                         console.log(`Room ${code} moved to inspection phase.`);
@@ -329,6 +393,12 @@ app.prepare().then(() => {
         }
 
         function broadcastGameState(code, room) {
+            if (!room.players || room.players.length === 0) return;
+            // Guard: ensure sheriffIndex is valid
+            if (room.sheriffIndex >= room.players.length) {
+                room.sheriffIndex = 0;
+            }
+            const sheriff = room.players[room.sheriffIndex];
             room.players.forEach(p => {
                 io.to(p.id).emit('game-state-updated', {
                     players: room.players.map(pl => {
@@ -348,7 +418,7 @@ app.prepare().then(() => {
                             lastDiscarded: pl.lastDiscarded || []
                         }
                     }),
-                    sheriffId: room.players[room.sheriffIndex].id,
+                    sheriffId: sheriff.id,
                     phase: room.phase,
                     round: room.round,
                     maxRounds: room.maxRounds,
@@ -383,24 +453,31 @@ app.prepare().then(() => {
                                     target.stand.push(card);
                                     penaltyOwedToMerchant += card.penalty;
                                 } else {
+                                    // Card is contraband or wrong type — still goes to stand, but triggers penalty
+                                    target.stand.push(card);
                                     truthful = false;
                                     penaltyOwedToSheriff += card.penalty;
                                 }
                             });
 
                             if (truthful) {
-                                sheriff.coins -= penaltyOwedToMerchant;
-                                target.coins += penaltyOwedToMerchant;
+                                // Merchant was honest: sheriff pays penalty per card
+                                const actualPay = Math.min(penaltyOwedToMerchant, sheriff.coins);
+                                sheriff.coins -= actualPay;
+                                target.coins += actualPay;
                             } else {
-                                target.coins -= penaltyOwedToSheriff;
-                                sheriff.coins += penaltyOwedToSheriff;
+                                // Merchant was caught: merchant pays penalty, sheriff keeps declared cards
+                                const actualPay = Math.min(penaltyOwedToSheriff, target.coins);
+                                target.coins -= actualPay;
+                                sheriff.coins += actualPay;
                             }
                         } else if (action === 'pass') {
                             // Passed - transfer bribe (if any)
                             const bribeAmount = target.bag.bribe || 0;
                             if (bribeAmount > 0) {
-                                target.coins -= bribeAmount;
-                                sheriff.coins += bribeAmount;
+                                const actualBribe = Math.min(bribeAmount, target.coins);
+                                target.coins -= actualBribe;
+                                sheriff.coins += actualBribe;
                             }
 
                             target.bag.cards.forEach(card => target.stand.push(card));
@@ -408,8 +485,9 @@ app.prepare().then(() => {
 
                         target.bag.resolvedFinished = true;
 
-                        // Check if all bags resolved completely
-                        const allResolved = room.players.every(p => p.id === sheriff.id || (p.bag && p.bag.resolvedFinished));
+                        // Check if all ACTIVE bags resolved (skip disconnected players)
+                        const activeMerchants = room.players.filter(p => p.id !== sheriff.id && !p.disconnected);
+                        const allResolved = activeMerchants.every(p => p.bag && p.bag.resolvedFinished);
                         if (allResolved) {
                             room.phase = 'end_round';
                         }
@@ -422,30 +500,41 @@ app.prepare().then(() => {
 
         socket.on('next-round', ({ code }) => {
             const room = rooms[code];
-            if (room) {
-                // Check if game should end
-                if (room.round >= room.maxRounds) {
-                    // Calculate scores and end game
-                    const finalScores = calculateFinalScores(room);
-                    room.phase = 'game_over';
-                    room.finalScores = finalScores;
-                    broadcastGameState(code, room);
-                    return;
-                }
+            if (!room) return;
+            // Only sheriff can advance
+            if (room.players[room.sheriffIndex]?.id !== socket.id) return;
 
-                room.round++;
-                room.sheriffIndex = (room.sheriffIndex + 1) % room.players.length;
-                room.players.forEach(p => {
-                    p.bag = null;
-                    while (p.cards.length < 6 && room.deck.length > 0) {
-                        p.cards.push(room.deck.shift());
-                    }
-                    p.hasExchanged = (p.id === room.players[room.sheriffIndex].id);
-                    p.lastDiscarded = [];
-                });
-                room.phase = 'market';
+            // Check if game should end
+            if (room.round >= room.maxRounds) {
+                const finalScores = calculateFinalScores(room);
+                room.phase = 'game_over';
+                room.finalScores = finalScores;
                 broadcastGameState(code, room);
+                return;
             }
+
+            room.round++;
+            // Rotate sheriff, skip disconnected players
+            const totalPlayers = room.players.length;
+            let nextIdx = (room.sheriffIndex + 1) % totalPlayers;
+            let attempts = 0;
+            while (room.players[nextIdx]?.disconnected && attempts < totalPlayers) {
+                nextIdx = (nextIdx + 1) % totalPlayers;
+                attempts++;
+            }
+            room.sheriffIndex = nextIdx;
+
+            room.players.forEach(p => {
+                p.bag = null;
+                // Top-up cards to 6
+                while (p.cards.length < 6 && room.deck.length > 0) {
+                    p.cards.push(room.deck.shift());
+                }
+                p.hasExchanged = (p.id === room.players[room.sheriffIndex].id);
+                p.lastDiscarded = [];
+            });
+            room.phase = 'market';
+            broadcastGameState(code, room);
         });
 
         socket.on('end-game-now', ({ code }) => {
@@ -477,7 +566,12 @@ app.prepare().then(() => {
                             const p = rooms[code].players.find(pl => pl.token === player.token);
                             if (p && p.disconnected) {
                                 rooms[code].players = rooms[code].players.filter(pl => pl.token !== player.token);
-                                if (rooms[code].players.length === 0) {
+                                if (rooms[code].players.length <= 1 && rooms[code].gameState === 'playing') {
+                                    rooms[code].phase = 'game_over';
+                                    rooms[code].finalScores = calculateFinalScores(rooms[code]);
+                                    broadcastGameState(code, rooms[code]);
+                                    console.log(`Room ${code} ended (only 1 player left after timeout)`);
+                                } else if (rooms[code].players.length === 0) {
                                     delete rooms[code];
                                 } else {
                                     broadcastGameState(code, rooms[code]);
