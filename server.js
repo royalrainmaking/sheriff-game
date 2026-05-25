@@ -454,8 +454,8 @@ app.prepare().then(() => {
                                     target.stand.push(card);
                                     penaltyOwedToMerchant += card.penalty;
                                 } else {
-                                    // Card is contraband or wrong type — still goes to stand, but triggers penalty
-                                    target.stand.push(card);
+                                    // Card is contraband or wrong type — confiscated (goes to discard), triggers penalty
+                                    room.discard.push(card);
                                     truthful = false;
                                     penaltyOwedToSheriff += card.penalty;
                                 }
