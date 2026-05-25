@@ -368,6 +368,32 @@ export default function Home() {
                       <span style={{ fontSize: '0.9rem', color: 'var(--foreground)', opacity: 0.7, fontWeight: 'bold', background: 'rgba(0,0,0,0.05)', padding: '4px 8px', borderRadius: '4px', marginTop: '5px' }}>
                         Round {Math.ceil(gameState.round / players.length)} of {gameState.maxRounds / players.length} (Turn {gameState.round}/{gameState.maxRounds})
                       </span>
+                      {(() => {
+                        let waitingForText = '';
+                        if (gameState.phase === 'market') {
+                          const waitingNames = players.filter(p => p.id !== gameState.sheriffId && !p.hasExchanged).map(p => p.name);
+                          waitingForText = waitingNames.length > 0 ? `Waiting for: ${waitingNames.join(', ')}` : 'Waiting for Sheriff...';
+                        } else if (gameState.phase === 'load_bag') {
+                          const waitingNames = players.filter(p => !p.bag && p.id !== gameState.sheriffId).map(p => p.name);
+                          waitingForText = waitingNames.length > 0 ? `Waiting for Bags: ${waitingNames.join(', ')}` : 'Waiting for Sheriff...';
+                        } else if (gameState.phase === 'inspection') {
+                          const sheriffName = players.find(p => p.id === gameState.sheriffId)?.name;
+                          waitingForText = `Sheriff (${sheriffName}) is thinking...`;
+                        } else if (gameState.phase === 'end_round') {
+                          waitingForText = `Waiting for Sheriff to start next round`;
+                        }
+
+                        return (
+                          <div style={{ marginTop: '10px', fontSize: '0.9rem', color: 'var(--accent)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <motion.span
+                              animate={{ opacity: [1, 0.2, 1] }}
+                              transition={{ repeat: Infinity, duration: 1.5 }}
+                              style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent)' }}
+                            />
+                            {waitingForText}
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.2rem', fontWeight: 'bold' }}>
                       <Coins size={20} color="#d4af37" /> {players.find(p => p.id === socket.id)?.coins} Coins
@@ -607,6 +633,18 @@ export default function Home() {
                               </span>
                             </div>
 
+                            {/* Discarded Cards */}
+                            {p.lastDiscarded && p.lastDiscarded.length > 0 && (
+                              <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(211, 47, 47, 0.05)', padding: '5px 10px', borderRadius: '4px', borderLeft: '2px solid var(--accent)' }}>
+                                <span style={{ fontSize: '0.85rem', color: 'var(--accent)', fontWeight: 'bold' }}>Discarded: </span>
+                                <div style={{ display: 'flex', gap: '4px' }}>
+                                  {p.lastDiscarded.map((c, i) => (
+                                    <div key={i} title={c.name} style={{ width: '24px', height: '36px', background: `url(${getCardImageUrl(c.name)}) center/100% 100% no-repeat`, borderRadius: '4px', border: `1px solid rgba(0,0,0,0.3)`, boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
                             {/* Stand showing passed items */}
                             {p.stand && p.stand.length > 0 && (() => {
                               const isOwnStand = p.id === socket.id;
@@ -654,8 +692,30 @@ export default function Home() {
                             {p.bag && !isSheriff && (
                               <div style={{ marginTop: '10px', padding: '10px', background: 'rgba(184, 134, 11, 0.1)', borderRadius: '6px' }}>
                                 {p.bag.status ? (
-                                  <div>
-                                    <strong>Resolved: {p.bag.status.toUpperCase()}!</strong>
+                                  <div style={{ textAlign: 'center' }}>
+                                    <strong style={{ color: p.bag.status === 'inspect' ? 'var(--accent)' : 'var(--primary)', fontSize: '1.1rem' }}>
+                                      {p.bag.status === 'inspect' ? '🔍 INSPECTED!' : '✅ PASSED!'}
+                                    </strong>
+                                    <p style={{ fontSize: '0.8rem', opacity: 0.8, margin: '5px 0' }}>Resolving cards...</p>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', justifyContent: 'center' }}>
+                                      {p.bag.cards && p.bag.cards.map((c, i) => (
+                                        <motion.div
+                                          initial={{ scale: 0, rotateY: 180 }}
+                                          animate={{ scale: 1, rotateY: 0 }}
+                                          transition={{ delay: i * 0.2 }}
+                                          key={i}
+                                          title={c.name}
+                                          style={{
+                                            width: '35px',
+                                            height: '52px',
+                                            borderRadius: '4px',
+                                            background: `url(${getCardImageUrl(c.name)}) center/100% 100% no-repeat`,
+                                            boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+                                            border: `1px solid ${c.color}88`
+                                          }}
+                                        />
+                                      ))}
+                                    </div>
                                   </div>
                                 ) : (
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

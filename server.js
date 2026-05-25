@@ -96,6 +96,7 @@ app.prepare().then(() => {
                     p.stand = [];
                     p.coins = 50;
                     p.bag = null;
+                    p.lastDiscarded = [];
                 });
 
                 broadcastGameState(code, room);
@@ -109,11 +110,15 @@ app.prepare().then(() => {
                 const player = room.players.find(p => p.id === socket.id);
                 if (player && !player.hasExchanged) {
                     // Remove selected cards to discard
+                    const discardedThisTurn = [];
                     [...cardIndexes].sort((a, b) => b - a).forEach(idx => {
                         if (player.cards[idx]) {
-                            room.discard.push(player.cards.splice(idx, 1)[0]);
+                            const discarded = player.cards.splice(idx, 1)[0];
+                            room.discard.push(discarded);
+                            discardedThisTurn.push(discarded);
                         }
                     });
+                    player.lastDiscarded = discardedThisTurn;
                     // Draw back to 6
                     while (player.cards.length < 6 && room.deck.length > 0) {
                         player.cards.push(room.deck.shift());
@@ -271,7 +276,8 @@ app.prepare().then(() => {
                                 bribe: pl.bag.bribe,
                                 revealed: pl.bag.revealed,
                                 cards: (pl.bag.revealed || pl.id === p.id) ? pl.bag.cards : null
-                            } : null
+                            } : null,
+                            lastDiscarded: pl.lastDiscarded || []
                         }
                     }),
                     sheriffId: room.players[room.sheriffIndex].id,
@@ -289,52 +295,59 @@ app.prepare().then(() => {
                 const target = room.players.find(p => p.id === targetPlayerId);
                 const sheriff = room.players[room.sheriffIndex];
 
-                if (target && target.bag) {
+                if (target && target.bag && !target.bag.resolving) {
+                    target.bag.resolving = true;
                     target.bag.status = action;
-
-                    if (action === 'inspect') {
-                        target.bag.revealed = true;
-                        let truthful = true;
-                        let penaltyOwedToSheriff = 0;
-                        let penaltyOwedToMerchant = 0;
-
-                        target.bag.cards.forEach(card => {
-                            if (card.name === target.bag.declaredGood) {
-                                target.stand.push(card);
-                                penaltyOwedToMerchant += card.penalty;
-                            } else {
-                                truthful = false;
-                                penaltyOwedToSheriff += card.penalty;
-                            }
-                        });
-
-                        if (truthful) {
-                            sheriff.coins -= penaltyOwedToMerchant;
-                            target.coins += penaltyOwedToMerchant;
-                        } else {
-                            target.coins -= penaltyOwedToSheriff;
-                            sheriff.coins += penaltyOwedToSheriff;
-                        }
-                    } else if (action === 'pass') {
-                        // Passed - transfer bribe (if any)
-                        const bribeAmount = target.bag.bribe || 0;
-                        if (bribeAmount > 0) {
-                            target.coins -= bribeAmount;
-                            sheriff.coins += bribeAmount;
-                        }
-
-                        // everyone sees the cards anyway as they go to the stand
-                        target.bag.revealed = true;
-                        target.bag.cards.forEach(card => target.stand.push(card));
-                    }
-
-                    // Check if all bags resolved
-                    const allResolved = room.players.every(p => p.id === sheriff.id || p.bag?.status);
-                    if (allResolved) {
-                        room.phase = 'end_round';
-                    }
+                    target.bag.revealed = true;
 
                     broadcastGameState(code, room);
+
+                    setTimeout(() => {
+                        if (!rooms[code] || rooms[code].phase === 'game_over') return;
+
+                        if (action === 'inspect') {
+                            let truthful = true;
+                            let penaltyOwedToSheriff = 0;
+                            let penaltyOwedToMerchant = 0;
+
+                            target.bag.cards.forEach(card => {
+                                if (card.name === target.bag.declaredGood) {
+                                    target.stand.push(card);
+                                    penaltyOwedToMerchant += card.penalty;
+                                } else {
+                                    truthful = false;
+                                    penaltyOwedToSheriff += card.penalty;
+                                }
+                            });
+
+                            if (truthful) {
+                                sheriff.coins -= penaltyOwedToMerchant;
+                                target.coins += penaltyOwedToMerchant;
+                            } else {
+                                target.coins -= penaltyOwedToSheriff;
+                                sheriff.coins += penaltyOwedToSheriff;
+                            }
+                        } else if (action === 'pass') {
+                            // Passed - transfer bribe (if any)
+                            const bribeAmount = target.bag.bribe || 0;
+                            if (bribeAmount > 0) {
+                                target.coins -= bribeAmount;
+                                sheriff.coins += bribeAmount;
+                            }
+
+                            target.bag.cards.forEach(card => target.stand.push(card));
+                        }
+
+                        target.bag.resolvedFinished = true;
+
+                        // Check if all bags resolved completely
+                        const allResolved = room.players.every(p => p.id === sheriff.id || (p.bag && p.bag.resolvedFinished));
+                        if (allResolved) {
+                            room.phase = 'end_round';
+                        }
+
+                        broadcastGameState(code, room);
+                    }, 10000); // 10 seconds delay
                 }
             }
         });
@@ -360,6 +373,7 @@ app.prepare().then(() => {
                         p.cards.push(room.deck.shift());
                     }
                     p.hasExchanged = (p.id === room.players[room.sheriffIndex].id);
+                    p.lastDiscarded = [];
                 });
                 room.phase = 'market';
                 broadcastGameState(code, room);
