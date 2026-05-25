@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Users, Plus, LogIn, ShoppingBag, User, Coins } from 'lucide-react';
+// removed lucide-react imports
 import { motion, AnimatePresence } from 'framer-motion';
 import { socket } from '@/lib/socket';
 
@@ -17,6 +17,8 @@ export default function Home() {
   const [declaring, setDeclaring] = useState(false);
   const [declaredGood, setDeclaredGood] = useState('Apple');
   const [bribeInput, setBribeInput] = useState(0);
+  const [phaseCountdown, setPhaseCountdown] = useState(null); // { label, count }
+  const [prevPhase, setPrevPhase] = useState(null);
 
   const getCardImageUrl = (name) => {
     switch (name) {
@@ -73,6 +75,34 @@ export default function Home() {
     };
   }, []);
 
+  // Phase countdown effect
+  const PHASE_LABELS = {
+    market: { emoji: '🔄', title: 'เฟส: แลกเปลี่ยนไพ่', sub: 'ผู้เล่นทุกคนเลือกไพ่ที่ต้องการทิ้ง' },
+    load_bag: { emoji: '🎒', title: 'เฟส: แพ็กของใส่ถุง', sub: 'เลือกไพ่แล้วประกาศสินค้าของคุณ' },
+    inspection: { emoji: '🔍', title: 'เฟส: ตรวจค้น', sub: 'นายอำเภอกำลังตรวจสอบถุงสินค้า' },
+    end_round: { emoji: '🏁', title: 'สิ้นสุดการตรวจสอบ', sub: 'รอนายอำเภอเริ่มตาถัดไป' },
+  };
+
+  useEffect(() => {
+    if (!gameState?.phase) return;
+    if (gameState.phase === prevPhase) return;
+    setPrevPhase(gameState.phase);
+    const label = PHASE_LABELS[gameState.phase];
+    if (!label) return;
+    let count = 3;
+    setPhaseCountdown({ ...label, count });
+    const interval = setInterval(() => {
+      count -= 1;
+      if (count <= 0) {
+        clearInterval(interval);
+        setPhaseCountdown(null);
+      } else {
+        setPhaseCountdown(prev => prev ? { ...prev, count } : null);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [gameState?.phase]);
+
   const handleCreateRoom = () => {
     if (!name) return alert('Please enter your name');
     socket.emit('create-room', { name, avatar });
@@ -124,7 +154,7 @@ export default function Home() {
       <div className="glass-panel animate-fade-in" style={{ width: '100%', maxWidth: view === 'game' ? '1000px' : '450px', textAlign: 'center', transition: 'max-width 0.5s ease' }}>
         {view !== 'game' && (
           <div style={{ marginBottom: '40px' }}>
-            <ShoppingBag size={48} color="var(--primary)" style={{ marginBottom: '10px' }} />
+            <span className="material-symbols-rounded" style={{ fontSize: '48px', color: '#DB4437', marginBottom: '10px', filter: 'drop-shadow(0 2px 4px rgba(219,68,55,0.4))' }}>local_mall</span>
             <h1 style={{ fontSize: '2.5rem', color: 'var(--primary)', marginBottom: '5px' }}>SHERIFF OF<br />NOTTINGHAM</h1>
             <p style={{ color: 'var(--foreground)', opacity: 0.7, letterSpacing: '2px' }}>SMUGGLING & BLUFFING</p>
           </div>
@@ -139,17 +169,17 @@ export default function Home() {
               exit={{ opacity: 0, x: 20 }}
             >
               <div className="input-group" style={{ textAlign: 'left' }}>
-                <label>Your Name</label>
+                <label>ชื่อของคุณ</label>
                 <input
                   type="text"
-                  placeholder="Enter alias..."
+                  placeholder="ใส่ชื่อนักเดินทาง..."
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                 />
               </div>
 
               <div style={{ textAlign: 'left', marginBottom: '25px' }}>
-                <label style={{ display: 'block', marginBottom: '10px', fontSize: '0.9rem', color: 'var(--foreground)', fontWeight: 'bold' }}>Choose Avatar</label>
+                <label style={{ display: 'block', marginBottom: '10px', fontSize: '0.9rem', color: 'var(--foreground)', fontWeight: 'bold' }}>เลือกตัวละคร</label>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   {['👳‍♂️', '🧕', '🧔', '👩‍🦰', '🧙‍♂️', '🧝‍♀️', '🕵️', '🤴'].map((av) => (
                     <button
@@ -173,7 +203,7 @@ export default function Home() {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
                 <button className="gold-button" onClick={() => setView('create')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
-                  <Plus size={20} /> Create New Room
+                  <span className="material-symbols-rounded" style={{ fontSize: '24px', color: '#0F9D58' }}>add_circle</span> สร้างห้องใหม่
                 </button>
                 <button
                   style={{
@@ -188,7 +218,7 @@ export default function Home() {
                   }}
                   onClick={() => setView('join')}
                 >
-                  <LogIn size={20} /> Join with Code
+                  <span className="material-symbols-rounded" style={{ fontSize: '24px', color: '#4285F4' }}>login</span> เข้าร่วมด้วยรหัส
                 </button>
               </div>
             </motion.div>
@@ -201,10 +231,10 @@ export default function Home() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
             >
-              <h2 style={{ color: 'var(--primary)', marginBottom: '20px' }}>CREATE ROOM</h2>
-              <p style={{ marginBottom: '20px', fontSize: '0.9rem' }}>You are starting a new game session.</p>
-              <button className="gold-button" style={{ width: '100%' }} onClick={handleCreateRoom}>Confirm & Create</button>
-              <button onClick={() => setView('menu')} style={{ background: 'none', color: '#888', marginTop: '15px' }}>Cancel</button>
+              <h2 style={{ color: 'var(--primary)', marginBottom: '20px' }}>สร้างห้องเกม</h2>
+              <p style={{ marginBottom: '20px', fontSize: '0.9rem' }}>คุณกำลังสร้างเซสชั่นเกมใหม่</p>
+              <button className="gold-button" style={{ width: '100%' }} onClick={handleCreateRoom}>ยืนยัน & สร้างห้อง</button>
+              <button onClick={() => setView('menu')} style={{ background: 'none', color: '#888', marginTop: '15px' }}>ยกเลิก</button>
             </motion.div>
           )}
 
@@ -215,20 +245,20 @@ export default function Home() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
             >
-              <h2 style={{ color: 'var(--primary)', marginBottom: '20px' }}>JOIN ROOM</h2>
+              <h2 style={{ color: 'var(--primary)', marginBottom: '20px' }}>เข้าร่วมห้อง</h2>
               <div className="input-group" style={{ textAlign: 'left' }}>
-                <label>Room Code</label>
+                <label>รหัสห้อง</label>
                 <input
                   type="text"
-                  placeholder="e.g. X1Y2"
+                  placeholder="เช่น X1Y2"
                   value={roomCode}
                   onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
                   maxLength={4}
                   style={{ fontSize: '1.5rem', textAlign: 'center', letterSpacing: '5px' }}
                 />
               </div>
-              <button className="gold-button" style={{ width: '100%' }} onClick={handleJoinRoom}>Join Game</button>
-              <button onClick={() => setView('menu')} style={{ background: 'none', color: '#888', marginTop: '15px' }}>Back to Menu</button>
+              <button className="gold-button" style={{ width: '100%' }} onClick={handleJoinRoom}>เข้าร่วมเกม</button>
+              <button onClick={() => setView('menu')} style={{ background: 'none', color: '#888', marginTop: '15px' }}>กลับหน้าหลัก</button>
             </motion.div>
           )}
 
@@ -240,33 +270,33 @@ export default function Home() {
               exit={{ opacity: 0, scale: 1.1 }}
             >
               <div style={{ background: 'var(--primary)', padding: '10px', borderRadius: '8px', marginBottom: '20px' }}>
-                <p style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.8)', textTransform: 'uppercase' }}>Room Code</p>
+                <p style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.8)', textTransform: 'uppercase' }}>รหัสห้อง</p>
                 <h2 style={{ fontSize: '2rem', letterSpacing: '8px', color: '#fff' }}>{currentRoom}</h2>
               </div>
 
               <div style={{ textAlign: 'left', marginBottom: '30px' }}>
-                <h3 style={{ fontSize: '1rem', color: 'var(--foreground)', opacity: 0.8, marginBottom: '15px' }}>Players ({players.length}/6)</h3>
+                <h3 style={{ fontSize: '1rem', color: 'var(--foreground)', opacity: 0.8, marginBottom: '15px' }}>ผู้เล่น ({players.length}/6)</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   {players.map((p, i) => (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(0,0,0,0.05)', padding: '10px', borderRadius: '8px' }}>
                       <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem', border: '2px solid var(--primary)', boxShadow: '0 2px 5px rgba(0,0,0,0.1)' }}>
                         {p.avatar || '👤'}
                       </div>
-                      <span style={{ fontWeight: '600', color: 'var(--foreground)' }}>{p.name} {p.id === socket.id ? '(You)' : ''}</span>
+                      <span style={{ fontWeight: '600', color: 'var(--foreground)' }}>{p.name} {p.id === socket.id ? '(คุณ)' : ''}</span>
                     </div>
                   ))}
                   {players.length < 2 && (
-                    <p style={{ fontSize: '0.8rem', color: '#666', fontStyle: 'italic', marginTop: '10px' }}>Waiting for more players...</p>
+                    <p style={{ fontSize: '0.8rem', color: '#666', fontStyle: 'italic', marginTop: '10px' }}>รอผู้เล่นคนอื่น...</p>
                   )}
                 </div>
               </div>
 
               {players.length >= 1 && players[0].id === socket.id && (
-                <button className="gold-button" style={{ width: '100%', fontSize: '1.2rem' }} onClick={handleStartGame}>Start Game</button>
+                <button className="gold-button" style={{ width: '100%', fontSize: '1.2rem' }} onClick={handleStartGame}>เริ่มเกม</button>
               )}
 
               <p style={{ marginTop: '20px', fontSize: '0.8rem', color: '#555' }}>
-                Share the code with your friends to join.
+                แชร์รหัสให้เพื่อนเข้าร่วม
               </p>
             </motion.div>
           )}
@@ -275,8 +305,43 @@ export default function Home() {
               key="game"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              style={{ width: '100%', margin: '0 auto' }}
+              style={{ width: '100%', margin: '0 auto', position: 'relative' }}
             >
+              {/* Phase Countdown Overlay */}
+              <AnimatePresence>
+                {phaseCountdown && (
+                  <motion.div
+                    key="countdown"
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 1.2 }}
+                    style={{
+                      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                      background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(8px)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                      zIndex: 9999
+                    }}
+                  >
+                    <motion.div
+                      initial={{ y: -30, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      style={{ textAlign: 'center' }}
+                    >
+                      <div style={{ fontSize: '5rem', marginBottom: '10px' }}>{phaseCountdown.emoji}</div>
+                      <h2 style={{ fontSize: '2.2rem', color: 'var(--primary)', fontWeight: 'bold', marginBottom: '8px' }}>{phaseCountdown.title}</h2>
+                      <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: '1.1rem', marginBottom: '30px' }}>{phaseCountdown.sub}</p>
+                      <motion.div
+                        key={phaseCountdown.count}
+                        initial={{ scale: 1.5, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        style={{ fontSize: '6rem', fontWeight: 'bold', color: '#fff', lineHeight: 1, textShadow: '0 0 40px rgba(212,175,55,0.6)' }}
+                      >
+                        {phaseCountdown.count}
+                      </motion.div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
               {gameState.phase === 'game_over' ? (
                 <div style={{ padding: '20px', textAlign: 'center' }}>
                   <motion.h1
@@ -284,9 +349,9 @@ export default function Home() {
                     animate={{ scale: 1, opacity: 1 }}
                     style={{ fontSize: '3.5rem', color: 'var(--primary)', marginBottom: '10px', textShadow: '0 4px 15px rgba(212,175,55,0.5)' }}
                   >
-                    🏆 GAME OVER 🏆
+                    🏆 จบเกม 🏆
                   </motion.h1>
-                  <p style={{ fontSize: '1.2rem', color: 'var(--foreground)', marginBottom: '40px' }}>Final Scores & Standings</p>
+                  <p style={{ fontSize: '1.2rem', color: 'var(--foreground)', marginBottom: '40px' }}>คะแนนสุดท้ายและอันดับ</p>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '800px', margin: '0 auto' }}>
                     {gameState.finalScores && gameState.finalScores.map((score, index) => (
@@ -317,7 +382,7 @@ export default function Home() {
                             </span>
                             <span style={{ fontSize: '2.5rem' }}>{score.avatar}</span>
                             <span style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--foreground)' }}>
-                              {score.name} {score.id === socket.id ? '(You)' : ''}
+                              {score.name} {score.id === socket.id ? '(คุณ)' : ''}
                             </span>
                           </div>
                           <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: 'var(--primary)', textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
@@ -328,24 +393,24 @@ export default function Home() {
                         {/* Score Breakdown Grid */}
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'space-between', fontSize: '0.9rem', textAlign: 'left' }}>
                           <div style={{ flex: 1, minWidth: '100px', background: 'rgba(0,0,0,0.03)', padding: '10px', borderRadius: '8px' }}>
-                            <span style={{ display: 'block', color: 'var(--foreground)', opacity: 0.7, fontSize: '0.8rem' }}>Legal Goods</span>
-                            <span style={{ display: 'block', fontWeight: 'bold', fontSize: '1.2rem', color: 'var(--foreground)' }}>+{score.legalValue} pts</span>
-                            <span style={{ fontSize: '0.75rem', opacity: 0.5 }}>({score.legalCount} items)</span>
+                            <span style={{ display: 'block', color: 'var(--foreground)', opacity: 0.7, fontSize: '0.8rem' }}>สินค้าถูกกฎหมาย</span>
+                            <span style={{ display: 'block', fontWeight: 'bold', fontSize: '1.2rem', color: 'var(--foreground)' }}>+{score.legalValue} แต้ม</span>
+                            <span style={{ fontSize: '0.75rem', opacity: 0.5 }}>({score.legalCount} ใบ)</span>
                           </div>
                           <div style={{ flex: 1, minWidth: '100px', background: 'rgba(211, 47, 47, 0.05)', padding: '10px', borderRadius: '8px' }}>
-                            <span style={{ display: 'block', color: 'var(--accent)', opacity: 0.8, fontSize: '0.8rem' }}>Contraband</span>
-                            <span style={{ display: 'block', fontWeight: 'bold', fontSize: '1.2rem', color: 'var(--accent)' }}>+{score.contrabandValue} pts</span>
-                            <span style={{ fontSize: '0.75rem', opacity: 0.5 }}>({score.contrabandCount} items)</span>
+                            <span style={{ display: 'block', color: 'var(--accent)', opacity: 0.8, fontSize: '0.8rem' }}>ของเถื่อน</span>
+                            <span style={{ display: 'block', fontWeight: 'bold', fontSize: '1.2rem', color: 'var(--accent)' }}>+{score.contrabandValue} แต้ม</span>
+                            <span style={{ fontSize: '0.75rem', opacity: 0.5 }}>({score.contrabandCount} ใบ)</span>
                           </div>
                           <div style={{ flex: 1, minWidth: '100px', background: 'rgba(212, 175, 55, 0.05)', padding: '10px', borderRadius: '8px' }}>
-                            <span style={{ display: 'block', color: 'var(--primary)', opacity: 0.9, fontSize: '0.8rem' }}>King/Queen</span>
-                            <span style={{ display: 'block', fontWeight: 'bold', fontSize: '1.2rem', color: 'var(--primary)' }}>+{score.kqBonus} pts</span>
-                            <span style={{ fontSize: '0.75rem', opacity: 0.5 }}>(Bonuses)</span>
+                            <span style={{ display: 'block', color: 'var(--primary)', opacity: 0.9, fontSize: '0.8rem' }}>โบนัสราชา/ราชินี</span>
+                            <span style={{ display: 'block', fontWeight: 'bold', fontSize: '1.2rem', color: 'var(--primary)' }}>+{score.kqBonus} แต้ม</span>
+                            <span style={{ fontSize: '0.75rem', opacity: 0.5 }}>(โบนัส)</span>
                           </div>
                           <div style={{ flex: 1, minWidth: '100px', background: 'rgba(0,0,0,0.03)', padding: '10px', borderRadius: '8px' }}>
-                            <span style={{ display: 'block', color: 'var(--foreground)', opacity: 0.7, fontSize: '0.8rem' }}>Remaining Gold</span>
-                            <span style={{ display: 'block', fontWeight: 'bold', fontSize: '1.2rem', color: 'var(--foreground)' }}>+{score.coins} pts</span>
-                            <span style={{ fontSize: '0.75rem', opacity: 0.5 }}>(1:1 Value)</span>
+                            <span style={{ display: 'block', color: 'var(--foreground)', opacity: 0.7, fontSize: '0.8rem' }}>เงินสดคงเหลือ</span>
+                            <span style={{ display: 'block', fontWeight: 'bold', fontSize: '1.2rem', color: 'var(--foreground)' }}>+{score.coins} แต้ม</span>
+                            <span style={{ fontSize: '0.75rem', opacity: 0.5 }}>(อัตรา 1:1)</span>
                           </div>
                         </div>
                       </motion.div>
@@ -357,30 +422,30 @@ export default function Home() {
                     onClick={() => window.location.reload()}
                     style={{ marginTop: '50px', padding: '20px 50px', fontSize: '1.5rem', borderRadius: '50px' }}
                   >
-                    Play Again
+                    เล่นอีกครั้ง
                   </button>
                 </div>
               ) : (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', padding: '0 20px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                      <h2 style={{ fontSize: '1.5rem', color: 'var(--primary)' }}>Role: {gameState.sheriffId === socket.id ? '👑 SHERIFF' : '🎒 MERCHANT'}</h2>
+                      <h2 style={{ fontSize: '1.5rem', color: 'var(--primary)' }}>บทบาท: {gameState.sheriffId === socket.id ? '👑 นายอำเภอ' : '🎒 พ่อค้า'}</h2>
                       <span style={{ fontSize: '0.9rem', color: 'var(--foreground)', opacity: 0.7, fontWeight: 'bold', background: 'rgba(0,0,0,0.05)', padding: '4px 8px', borderRadius: '4px', marginTop: '5px' }}>
-                        Round {Math.ceil(gameState.round / players.length)} of {gameState.maxRounds / players.length} (Turn {gameState.round}/{gameState.maxRounds})
+                        รอบที่ {Math.ceil(gameState.round / players.length)} จาก {gameState.maxRounds / players.length} (ตาที่ {gameState.round}/{gameState.maxRounds})
                       </span>
                       {(() => {
                         let waitingForText = '';
                         if (gameState.phase === 'market') {
                           const waitingNames = players.filter(p => p.id !== gameState.sheriffId && !p.hasExchanged).map(p => p.name);
-                          waitingForText = waitingNames.length > 0 ? `Waiting for: ${waitingNames.join(', ')}` : 'Waiting for Sheriff...';
+                          waitingForText = waitingNames.length > 0 ? `รอ: ${waitingNames.join(', ')}` : 'รอนายอำเภอ...';
                         } else if (gameState.phase === 'load_bag') {
                           const waitingNames = players.filter(p => !p.bag && p.id !== gameState.sheriffId).map(p => p.name);
-                          waitingForText = waitingNames.length > 0 ? `Waiting for Bags: ${waitingNames.join(', ')}` : 'Waiting for Sheriff...';
+                          waitingForText = waitingNames.length > 0 ? `รอแพ็กถุง: ${waitingNames.join(', ')}` : 'รอนายอำเภอ...';
                         } else if (gameState.phase === 'inspection') {
                           const sheriffName = players.find(p => p.id === gameState.sheriffId)?.name;
-                          waitingForText = `Sheriff (${sheriffName}) is thinking...`;
+                          waitingForText = `นายอำเภอ (${sheriffName}) กำลังตัดสิน...`;
                         } else if (gameState.phase === 'end_round') {
-                          waitingForText = `Waiting for Sheriff to start next round`;
+                          waitingForText = `รอนายอำเภอเริ่มตาถัดไป`;
                         }
 
                         return (
@@ -396,22 +461,22 @@ export default function Home() {
                       })()}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.2rem', fontWeight: 'bold' }}>
-                      <Coins size={20} color="#d4af37" /> {players.find(p => p.id === socket.id)?.coins} Coins
+                      <span className="material-symbols-rounded" style={{ fontSize: '24px', color: '#F4B400' }}>monetization_on</span> {players.find(p => p.id === socket.id)?.coins} Coins
                     </div>
                   </div>
 
                   <div style={{ background: 'rgba(0,0,0,0.03)', padding: '20px', borderRadius: '16px', minHeight: '300px', position: 'relative' }}>
-                    <h3 style={{ marginBottom: '15px' }}>Your Hand</h3>
+                    <h3 style={{ marginBottom: '15px' }}>สินค้าของคุณ</h3>
 
                     {gameState.phase === 'market' && gameState.sheriffId === socket.id && (
                       <p style={{ color: 'var(--primary)', fontStyle: 'italic', marginBottom: '20px' }}>
-                        Market Phase: Waiting for merchants to exchange cards...
+                        ช่วงตลาด: กำลังรอผู้ค้าเปลี่ยนการ์ด...
                       </p>
                     )}
 
                     {gameState.phase === 'market' && gameState.sheriffId !== socket.id && (
                       <p style={{ color: 'var(--foreground)', opacity: 0.6, marginBottom: '20px' }}>
-                        Market Phase: Select up to 5 cards to discard and redraw. (You can also draw 0).
+                        ช่วงตลาด: เลือกการ์ดที่จะทิ้งและจั่วใหม่ได้สูงสุด 5 ใบ (หรือจะไม่เปลี่ยนเลยก็ได้
                       </p>
                     )}
 
@@ -423,7 +488,7 @@ export default function Home() {
 
                     {gameState.phase === 'load_bag' && gameState.sheriffId !== socket.id && (
                       <p style={{ color: 'var(--foreground)', opacity: 0.6, marginBottom: '20px' }}>
-                        Select 1 to 5 cards to put in your bag.
+                        เลือกสิ้นค้า 1 ถึง 5 เพื่อใส่ลงในถุงของคุณ
                       </p>
                     )}
 
@@ -462,25 +527,25 @@ export default function Home() {
 
                     {gameState.phase === 'market' && gameState.sheriffId !== socket.id && !players.find(p => p.id === socket.id)?.hasExchanged && (
                       <button className="gold-button" onClick={handleExchange} style={{ marginTop: '30px', padding: '15px 30px', fontSize: '1.2rem' }}>
-                        Discard & Draw {selectedCards.length} Cards
+                        ทิ้งการ์ด {selectedCards.length} ใบ
                       </button>
                     )}
 
                     {gameState.phase === 'market' && players.find(p => p.id === socket.id)?.hasExchanged && (
                       <p style={{ color: 'var(--primary)', marginTop: '20px', fontWeight: 'bold' }}>
-                        Cards exchanged! Waiting for others...
+                        เปลี่ยนการ์ดเรียบร้อยแล้ว! กำลังรอผู้เล่นคนอื่น...
                       </p>
                     )}
 
                     {gameState.phase === 'load_bag' && gameState.sheriffId !== socket.id && selectedCards.length > 0 && !declaring && !players.find(p => p.id === socket.id)?.bag && (
                       <button className="gold-button" onClick={() => setDeclaring(true)} style={{ marginTop: '30px', padding: '15px 30px', fontSize: '1.2rem' }}>
-                        Put {selectedCards.length} Cards in Bag
+                        ใส่สินค้า {selectedCards.length} ลงในถุง
                       </button>
                     )}
 
                     {declaring && (
                       <div style={{ marginTop: '30px', padding: '20px', background: 'rgba(255,255,255,0.8)', borderRadius: '8px', border: '1px solid var(--primary)' }}>
-                        <h3 style={{ marginBottom: '15px', color: 'var(--foreground)' }}>Declare Your Goods ({selectedCards.length} in bag)</h3>
+                        <h3 style={{ marginBottom: '15px', color: 'var(--foreground)' }}>ประกาศสินค้าของคุณ ({selectedCards.length} ในกระเป๋า)</h3>
                         <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginBottom: '20px' }}>
                           {['Apple', 'Cheese', 'Bread', 'Chicken'].map(good => (
                             <button
@@ -499,28 +564,32 @@ export default function Home() {
                             </button>
                           ))}
                         </div>
-                        <button className="gold-button" onClick={handleDeclare}>Confirm & Declare</button>
-                        <button onClick={() => setDeclaring(false)} style={{ display: 'block', margin: '15px auto 0', background: 'none', color: '#888', border: 'none', cursor: 'pointer' }}>Cancel</button>
+                        <button className="gold-button" onClick={handleDeclare}>ยืนยันและประกาศ</button>
+                        <button onClick={() => setDeclaring(false)} style={{ display: 'block', margin: '15px auto 0', background: 'none', color: '#888', border: 'none', cursor: 'pointer' }}>ยกเลิก</button>
                       </div>
                     )}
 
                     {players.find(p => p.id === socket.id)?.bag && gameState.phase === 'load_bag' && (
                       <div style={{ marginTop: '30px', padding: '20px', background: 'rgba(184, 134, 11, 0.1)', borderRadius: '8px' }}>
                         <h3 style={{ color: 'var(--primary)', marginBottom: '10px' }}>Bag Loaded!</h3>
-                        <p style={{ color: 'var(--foreground)' }}>
-                          You declared: <strong>{players.find(p => p.id === socket.id).bag.declaredAmount} x {players.find(p => p.id === socket.id).bag.declaredGood}</strong>.<br />
-                          Waiting for others...
-                        </p>
+                        <div style={{ color: 'var(--foreground)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            You declared: <strong>{players.find(p => p.id === socket.id).bag.declaredAmount} x </strong>
+                            <div style={{ width: '20px', height: '30px', background: `url(${getCardImageUrl(players.find(p => p.id === socket.id).bag.declaredGood)}) center/100% 100% no-repeat`, borderRadius: '2px', border: '1px solid rgba(0,0,0,0.2)' }} />
+                            <strong>{players.find(p => p.id === socket.id).bag.declaredGood}</strong>.
+                          </div>
+                          <div style={{ marginTop: '5px' }}>Waiting for others...</div>
+                        </div>
                       </div>
                     )}
 
                     {gameState.phase === 'inspection' && (
                       <div style={{ marginTop: '30px', background: 'rgba(211, 47, 47, 0.1)', padding: '20px', borderRadius: '8px', border: '1px solid var(--accent)' }}>
-                        <h2 style={{ color: 'var(--accent)', marginBottom: '10px' }}>INSPECTION PHASE</h2>
+                        <h2 style={{ color: 'var(--accent)', marginBottom: '10px' }}>ช่วงการตรวจค้น</h2>
                         <p style={{ color: 'var(--foreground)' }}>
                           {gameState.sheriffId === socket.id
-                            ? 'Sheriff, inspect the merchants below!'
-                            : 'The Sheriff is deciding whose bag to search...'}
+                            ? 'นายอำเภอ ตรวจค้นพ่อค้าด้านล่างนี้เลย!'
+                            : 'นายอำเภอกำลังตัดสินใจว่าจะตรวจค้นถุงของใคร...'}
                         </p>
 
                         {/* LARGE BRIBE UI FOR MERCHANT */}
@@ -529,13 +598,13 @@ export default function Home() {
                           const currentBribe = me?.bag?.bribe || 0;
                           return (
                             <div style={{ marginTop: '20px', padding: '20px', background: 'var(--background)', borderRadius: '12px', boxShadow: '0 5px 15px rgba(0,0,0,0.1)', textAlign: 'center' }}>
-                              <h3 style={{ marginBottom: '15px', color: 'var(--primary)' }}>💰 Let's make a deal...</h3>
+                              <h3 style={{ marginBottom: '15px', color: 'var(--primary)' }}>💰 เรามาทำข้อตกลงกันดีกว่า...</h3>
 
                               {currentBribe > 0 && (
                                 <div style={{ marginBottom: '15px', padding: '8px 20px', background: 'rgba(212, 175, 55, 0.1)', borderRadius: '50px', border: '1px dashed var(--primary)', display: 'inline-block' }}>
-                                  <span style={{ color: 'var(--foreground)' }}>Current Offer: </span>
+                                  <span style={{ color: 'var(--foreground)' }}>ข้อเสนอปัจจุบัน: </span>
                                   <span style={{ color: 'var(--primary)', fontWeight: 'bold', fontSize: '1.2rem', display: 'inline-flex', alignItems: 'center', gap: '5px', marginLeft: '5px' }}>
-                                    <Coins size={18} color="#d4af37" /> {currentBribe} Coins
+                                    <span className="material-symbols-rounded" style={{ fontSize: '20px', color: '#F4B400' }}>monetization_on</span> {currentBribe}
                                   </span>
                                 </div>
                               )}
@@ -564,10 +633,10 @@ export default function Home() {
                                   onClick={() => socket.emit('offer-bribe', { code: currentRoom, amount: bribeInput })}
                                   style={{ padding: '15px 30px', fontSize: '1.2rem' }}
                                 >
-                                  Send Offer
+                                  ยื่นข้อเสนอ
                                 </button>
                               </div>
-                              <p style={{ marginTop: '10px', fontSize: '0.85rem', opacity: 0.7 }}>Tip: Keep changing the offer to negotiate with the Sheriff!</p>
+                              <p style={{ marginTop: '10px', fontSize: '0.85rem', opacity: 0.7 }}>คำแนะนำ: ลองเปลี่ยนข้อเสนอไปเรื่อยๆ เพื่อเจรจาต่อรองกับนายอำเภอดูสิ!</p>
                             </div>
                           );
                         })()}
@@ -595,7 +664,7 @@ export default function Home() {
                             opacity: gameState.sheriffId === socket.id ? 1 : 0.8
                           }}
                         >
-                          START NEXT ROUND 🚀
+                          ดำเนินการต่อ 🚀
                         </motion.button>
                         {gameState.sheriffId !== socket.id && (
                           <p style={{ marginTop: '20px', color: 'var(--accent)', fontWeight: 'bold', fontSize: '1.2rem', textShadow: '0 2px 4px rgba(255,255,255,0.8)' }}>
@@ -624,26 +693,111 @@ export default function Home() {
                         return (
                           <div key={p.id} style={{ display: 'flex', flexDirection: 'column', padding: '15px', background: 'rgba(0,0,0,0.05)', borderRadius: '10px', borderLeft: isSheriff ? '4px solid var(--primary)' : '4px solid transparent' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <span style={{ display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 'bold', color: 'var(--foreground)' }}>
-                                <span style={{ fontSize: '1.5rem' }}>{p.avatar || '👤'}</span>
-                                {isSheriff ? '👑 ' : ''}{p.name} {p.id === socket.id ? '(You)' : ''}
-                              </span>
-                              <span style={{ color: 'var(--primary)', display: 'flex', gap: '4px', alignItems: 'center' }}>
-                                <Coins size={16} color="#d4af37" /> {p.coins} Coins
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                                  {isSheriff && (
+                                    <motion.div
+                                      animate={{ y: [0, -5, 0] }}
+                                      transition={{ repeat: Infinity, duration: 2 }}
+                                      style={{ fontSize: '2.5rem', filter: 'drop-shadow(0 4px 6px rgba(212,175,55,0.8))', zIndex: 5, marginBottom: '-15px' }}
+                                    >
+                                      👑
+                                    </motion.div>
+                                  )}
+                                  <div style={{ fontSize: '2.5rem', position: 'relative', zIndex: 2 }}>{p.avatar || '👤'}</div>
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                  <span style={{ fontWeight: 'bold', fontSize: '1.2rem', color: isSheriff ? 'var(--primary)' : 'var(--foreground)' }}>
+                                    {p.name} {p.id === socket.id ? '(คุณ)' : ''}
+                                  </span>
+                                  {isSheriff && <span style={{ fontSize: '0.8rem', background: 'var(--primary)', color: '#fff', padding: '2px 8px', borderRadius: '12px', width: 'fit-content', marginTop: '2px', fontWeight: 'bold', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>นายอำเภอ (Sheriff)</span>}
+                                </div>
+                              </div>
+                              <span style={{ color: 'var(--primary)', display: 'flex', gap: '4px', alignItems: 'center', fontSize: '1.2rem', fontWeight: 'bold' }}>
+                                <span className="material-symbols-rounded" style={{ fontSize: '24px', color: '#F4B400' }}>monetization_on</span> {p.coins}
                               </span>
                             </div>
 
-                            {/* Discarded Cards */}
-                            {p.lastDiscarded && p.lastDiscarded.length > 0 && (
-                              <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(211, 47, 47, 0.05)', padding: '5px 10px', borderRadius: '4px', borderLeft: '2px solid var(--accent)' }}>
-                                <span style={{ fontSize: '0.85rem', color: 'var(--accent)', fontWeight: 'bold' }}>Discarded: </span>
-                                <div style={{ display: 'flex', gap: '4px' }}>
-                                  {p.lastDiscarded.map((c, i) => (
-                                    <div key={i} title={c.name} style={{ width: '24px', height: '36px', background: `url(${getCardImageUrl(c.name)}) center/100% 100% no-repeat`, borderRadius: '4px', border: `1px solid rgba(0,0,0,0.3)`, boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
-                                  ))}
+                            {/* Pending Round Actions: Discards and Bags */}
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '15px' }}>
+
+                              {/* Discarded Cards */}
+                              {p.lastDiscarded && p.lastDiscarded.length > 0 && (
+                                <div style={{ flex: '1', minWidth: '150px', background: 'rgba(211, 47, 47, 0.05)', padding: '10px', borderRadius: '8px', border: '1px dashed var(--accent)' }}>
+                                  <div style={{ fontSize: '0.8rem', color: 'var(--accent)', fontWeight: 'bold', marginBottom: '8px' }}>🗑️ สินค้าที่ถูกทิ้ง</div>
+                                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                    {p.lastDiscarded.map((c, i) => (
+                                      <div key={i} title={c.name} style={{ width: '28px', height: '42px', background: `url(${getCardImageUrl(c.name)}) center/100% 100% no-repeat`, borderRadius: '4px', border: `1px solid rgba(0,0,0,0.3)`, boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+                                    ))}
+                                  </div>
                                 </div>
-                              </div>
-                            )}
+                              )}
+
+                              {/* Bag Info */}
+                              {p.bag && !isSheriff && (
+                                <div style={{ flex: '2', minWidth: '250px', background: 'rgba(184, 134, 11, 0.1)', padding: '10px', borderRadius: '8px', border: '1px solid var(--primary)' }}>
+                                  <div style={{ fontSize: '0.8rem', color: 'var(--primary)', fontWeight: 'bold', marginBottom: '8px' }}>🎒 ถุงสินค้าของพ่อค้า</div>
+
+                                  {p.bag.status ? (
+                                    <div style={{ textAlign: 'center' }}>
+                                      <strong style={{ color: p.bag.status === 'inspect' ? 'var(--accent)' : 'var(--primary)', fontSize: '1.1rem' }}>
+                                        {p.bag.status === 'inspect' ? '🔍 INSPECTED!' : '✅ PASSED!'}
+                                      </strong>
+                                      <p style={{ fontSize: '0.8rem', opacity: 0.8, margin: '5px 0' }}>กำลังสรุปผล...</p>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', justifyContent: 'center' }}>
+                                        {p.bag.cards && p.bag.cards.map((c, i) => {
+                                          const isOwner = p.id === socket.id;
+                                          const isContraband = c.type === 'contraband';
+                                          const showFaceDown = isContraband && !isOwner;
+                                          return (
+                                            <motion.div
+                                              initial={{ scale: 0, rotateY: 180 }}
+                                              animate={{ scale: 1, rotateY: 0 }}
+                                              transition={{ delay: i * 0.2 }}
+                                              key={i}
+                                              title={showFaceDown ? 'Contraband (Hidden)' : c.name}
+                                              style={{
+                                                width: '35px',
+                                                height: '52px',
+                                                borderRadius: '4px',
+                                                background: showFaceDown
+                                                  ? 'linear-gradient(135deg, #a30000 0%, #4a0000 100%)'
+                                                  : `url(${getCardImageUrl(c.name)}) center/100% 100% no-repeat`,
+                                                boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+                                                border: showFaceDown ? '1px solid #ff000055' : `1px solid ${c.color}88`,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                fontSize: '1.1rem'
+                                              }}
+                                            >
+                                              {showFaceDown && '🚫'}
+                                            </motion.div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                                      <div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--foreground)' }}>
+                                          <span>Declared: <strong>{p.bag.declaredAmount}x </strong></span>
+                                          <div style={{ width: '20px', height: '30px', background: `url(${getCardImageUrl(p.bag.declaredGood)}) center/100% 100% no-repeat`, borderRadius: '2px', border: '1px solid rgba(0,0,0,0.2)' }} />
+                                          <strong>{p.bag.declaredGood}</strong>
+                                        </div>
+                                        {p.bag.bribe > 0 && <span style={{ marginTop: '5px', color: 'var(--primary)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px' }}>(Bribe: <span className="material-symbols-rounded" style={{ fontSize: '16px', color: '#F4B400' }}>monetization_on</span> {p.bag.bribe})</span>}
+                                      </div>
+                                      {gameState.phase === 'inspection' && socket.id === gameState.sheriffId && (
+                                        <div style={{ display: 'flex', gap: '10px' }}>
+                                          <button onClick={() => socket.emit('resolve-bag', { code: currentRoom, targetPlayerId: p.id, action: 'pass' })} style={{ padding: '8px 12px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Pass</button>
+                                          <button onClick={() => socket.emit('resolve-bag', { code: currentRoom, targetPlayerId: p.id, action: 'inspect' })} style={{ padding: '8px 12px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Inspect</button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
 
                             {/* Stand showing passed items */}
                             {p.stand && p.stand.length > 0 && (() => {
@@ -653,10 +807,13 @@ export default function Home() {
                               const contrabandCount = p.stand.filter(c => c.type === 'contraband').length;
 
                               return (
-                                <div style={{ marginTop: '15px' }}>
-                                  <div style={{ fontSize: '0.9rem', color: 'var(--foreground)', marginBottom: '8px', fontWeight: 'bold' }}>
-                                    🛒 Stand Total Value: {isOwnStand ? privateTotal : publicTotal}
-                                    {!isOwnStand && contrabandCount > 0 && <span style={{ color: 'var(--accent)', marginLeft: '10px' }}>(+{contrabandCount} Hidden Items)</span>}
+                                <div style={{ marginTop: '15px', background: 'rgba(255,255,255,0.4)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(0,0,0,0.05)' }}>
+                                  <div style={{ fontSize: '0.9rem', color: 'var(--foreground)', marginBottom: '8px', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span>🛒 CARTS (STAND)</span>
+                                    <span>
+                                      มูลค่ารวม: <span style={{ color: 'var(--primary)', fontSize: '1.1rem' }}>{isOwnStand ? privateTotal : publicTotal}</span>
+                                      {!isOwnStand && contrabandCount > 0 && <span style={{ color: 'var(--accent)', marginLeft: '10px' }}>(+{contrabandCount} Hidden)</span>}
+                                    </span>
                                   </div>
                                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
                                     {p.stand.map((c, i) => {
@@ -687,52 +844,6 @@ export default function Home() {
                                 </div>
                               );
                             })()}
-
-                            {/* Bag Info */}
-                            {p.bag && !isSheriff && (
-                              <div style={{ marginTop: '10px', padding: '10px', background: 'rgba(184, 134, 11, 0.1)', borderRadius: '6px' }}>
-                                {p.bag.status ? (
-                                  <div style={{ textAlign: 'center' }}>
-                                    <strong style={{ color: p.bag.status === 'inspect' ? 'var(--accent)' : 'var(--primary)', fontSize: '1.1rem' }}>
-                                      {p.bag.status === 'inspect' ? '🔍 INSPECTED!' : '✅ PASSED!'}
-                                    </strong>
-                                    <p style={{ fontSize: '0.8rem', opacity: 0.8, margin: '5px 0' }}>Resolving cards...</p>
-                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', justifyContent: 'center' }}>
-                                      {p.bag.cards && p.bag.cards.map((c, i) => (
-                                        <motion.div
-                                          initial={{ scale: 0, rotateY: 180 }}
-                                          animate={{ scale: 1, rotateY: 0 }}
-                                          transition={{ delay: i * 0.2 }}
-                                          key={i}
-                                          title={c.name}
-                                          style={{
-                                            width: '35px',
-                                            height: '52px',
-                                            borderRadius: '4px',
-                                            background: `url(${getCardImageUrl(c.name)}) center/100% 100% no-repeat`,
-                                            boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
-                                            border: `1px solid ${c.color}88`
-                                          }}
-                                        />
-                                      ))}
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <div>
-                                      <span style={{ color: 'var(--foreground)' }}>Declared: <strong>{p.bag.declaredAmount}x {p.bag.declaredGood}</strong></span>
-                                      {p.bag.bribe > 0 && <span style={{ marginLeft: '10px', color: 'var(--primary)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px' }}>(Bribe Offered: <Coins size={14} color="#d4af37" /> {p.bag.bribe})</span>}
-                                    </div>
-                                    {gameState.phase === 'inspection' && socket.id === gameState.sheriffId && (
-                                      <div style={{ display: 'flex', gap: '10px' }}>
-                                        <button onClick={() => socket.emit('resolve-bag', { code: currentRoom, targetPlayerId: p.id, action: 'pass' })} style={{ padding: '8px 12px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Pass</button>
-                                        <button onClick={() => socket.emit('resolve-bag', { code: currentRoom, targetPlayerId: p.id, action: 'inspect' })} style={{ padding: '8px 12px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Inspect</button>
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            )}
                           </div>
                         )
                       })}
@@ -746,8 +857,23 @@ export default function Home() {
 
         <div style={{ marginTop: '40px', borderTop: '1px solid rgba(0,0,0,0.1)', paddingTop: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--foreground)', opacity: 0.6, fontSize: '0.8rem' }}>
-            <Users size={14} />
-            <span>Multiplayer Ready</span>
+            <span className="material-symbols-rounded" style={{ fontSize: '16px' }}>group</span>
+            <span>พร้อมเล่นหลายคน (Multiplayer)</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '10px', gap: '6px', fontSize: '0.75rem', color: '#888' }}>
+            <span>Made with</span>
+            <span style={{ color: '#e74c3c', fontSize: '1rem' }}>♥</span>
+            <span>by</span>
+            <span style={{
+              background: 'linear-gradient(135deg, #b8860b, #d4af37)',
+              color: '#fff',
+              padding: '2px 10px',
+              borderRadius: '20px',
+              fontWeight: '700',
+              fontSize: '0.8rem',
+              letterSpacing: '1px',
+              boxShadow: '0 2px 6px rgba(184,134,11,0.4)'
+            }}>obob</span>
           </div>
         </div>
       </div>
