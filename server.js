@@ -57,26 +57,94 @@ app.prepare().then(() => {
 
         socket.on('create-room', ({ name, avatar }) => {
             const code = Math.random().toString(36).substring(2, 6).toUpperCase();
+            const token = Math.random().toString(36).substring(2, 14);
             rooms[code] = {
-                players: [{ id: socket.id, name, avatar, coins: 50, cards: [], stand: [] }],
+                players: [{ id: socket.id, name, avatar, coins: 50, cards: [], stand: [], token, disconnected: false }],
                 gameState: 'lobby',
                 round: 0,
-                maxRounds: 0 // will be set on game start: 2 rounds per player
+                maxRounds: 0
             };
             socket.join(code);
-            socket.emit('room-created', { code });
+            socket.emit('room-created', { code, token });
             console.log(`Room created: ${code} by ${name}`);
         });
 
         socket.on('join-room', ({ name, avatar, code }) => {
             if (rooms[code]) {
-                rooms[code].players.push({ id: socket.id, name, avatar, coins: 50, cards: [], stand: [] });
+                if (rooms[code].gameState === 'playing') {
+                    return socket.emit('error', 'เกมเริ่มไปแล้ว ใช้ฟีเจอร์เชื่อมต่อใหม่แทน');
+                }
+                const token = Math.random().toString(36).substring(2, 14);
+                rooms[code].players.push({ id: socket.id, name, avatar, coins: 50, cards: [], stand: [], token, disconnected: false });
                 socket.join(code);
+                socket.emit('player-token', { token });
                 io.to(code).emit('player-joined', { players: rooms[code].players, code });
                 console.log(`${name} joined room ${code}`);
             } else {
-                socket.emit('error', 'Room not found');
+                socket.emit('error', 'ไม่พบห้องนี้');
             }
+        });
+
+        // Host kicks a player
+        socket.on('kick-player', ({ code, targetId }) => {
+            const room = rooms[code];
+            if (!room) return;
+            const isHost = room.players[0]?.id === socket.id;
+            if (!isHost) return;
+            if (targetId === socket.id) return; // can't kick yourself
+
+            room.players = room.players.filter(p => p.id !== targetId);
+            // Notify the kicked player
+            io.to(targetId).emit('you-were-kicked');
+            // Update remaining players
+            io.to(code).emit('player-joined', { players: room.players, code });
+            console.log(`Player ${targetId} was kicked from room ${code}`);
+        });
+
+        // Player voluntarily leaves
+        socket.on('leave-room', ({ code }) => {
+            const room = rooms[code];
+            if (!room) return;
+            const isHost = room.players[0]?.id === socket.id;
+
+            if (isHost) {
+                // Host leaves -> dissolve entire room
+                room.players.forEach(p => {
+                    if (p.id !== socket.id) {
+                        io.to(p.id).emit('room-dissolved', 'เจ้าของห้องออกจากห้อง ห้องถูกยุบแล้ว');
+                    }
+                });
+                delete rooms[code];
+                socket.leave(code);
+                console.log(`Room ${code} dissolved (host left)`);
+            } else {
+                room.players = room.players.filter(p => p.id !== socket.id);
+                socket.leave(code);
+                io.to(code).emit('player-joined', { players: room.players, code });
+                console.log(`Socket ${socket.id} left room ${code}`);
+            }
+            socket.emit('left-room');
+        });
+
+        // Reconnect to an ongoing game using stored token
+        socket.on('reconnect-game', ({ code, token }) => {
+            const room = rooms[code];
+            if (!room) return socket.emit('reconnect-failed', 'ห้องไม่มีอยู่แล้ว');
+            const player = room.players.find(p => p.token === token);
+            if (!player) return socket.emit('reconnect-failed', 'ไม่พบข้อมูลผู้เล่น');
+
+            // Update socket id and mark as online
+            player.id = socket.id;
+            player.disconnected = false;
+            socket.join(code);
+
+            if (room.gameState === 'playing') {
+                broadcastGameState(code, room);
+            } else {
+                io.to(code).emit('player-joined', { players: room.players, code });
+                socket.emit('room-created', { code, token }); // re-enter lobby
+            }
+            console.log(`Player ${player.name} reconnected to room ${code}`);
         });
 
         socket.on('start-game', ({ code }) => {
@@ -392,6 +460,50 @@ app.prepare().then(() => {
 
         socket.on('disconnect', () => {
             console.log('User disconnected:', socket.id);
+            for (const [code, room] of Object.entries(rooms)) {
+                const idx = room.players.findIndex(p => p.id === socket.id);
+                if (idx !== -1) {
+                    const player = room.players[idx];
+                    const isHost = idx === 0;
+
+                    if (room.gameState === 'playing') {
+                        // During game: mark disconnected, give 2 minutes to reconnect
+                        player.disconnected = true;
+                        broadcastGameState(code, room);
+                        console.log(`Player ${player.name} disconnected from game ${code}, waiting for reconnect...`);
+
+                        setTimeout(() => {
+                            if (!rooms[code]) return;
+                            const p = rooms[code].players.find(pl => pl.token === player.token);
+                            if (p && p.disconnected) {
+                                rooms[code].players = rooms[code].players.filter(pl => pl.token !== player.token);
+                                if (rooms[code].players.length === 0) {
+                                    delete rooms[code];
+                                } else {
+                                    broadcastGameState(code, rooms[code]);
+                                }
+                                console.log(`Player ${player.name} removed after timeout in room ${code}`);
+                            }
+                        }, 120000); // 2 minutes
+                    } else {
+                        // In lobby
+                        if (isHost) {
+                            // Host disconnects in lobby -> dissolve room
+                            room.players.forEach(p => {
+                                if (p.id !== socket.id) {
+                                    io.to(p.id).emit('room-dissolved', 'เจ้าของห้องหลุดการเชื่อมต่อ ห้องถูกยุบแล้ว');
+                                }
+                            });
+                            delete rooms[code];
+                            console.log(`Room ${code} dissolved (host disconnected in lobby)`);
+                        } else {
+                            room.players.splice(idx, 1);
+                            io.to(code).emit('player-joined', { players: room.players, code });
+                        }
+                    }
+                    break;
+                }
+            }
         });
     });
 

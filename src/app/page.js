@@ -34,12 +34,33 @@ export default function Home() {
     }
   };
 
+  // Helper to clear saved session
+  const clearSession = () => {
+    try { localStorage.removeItem('sheriff_session'); } catch (_) { }
+  };
+
   useEffect(() => {
     socket.connect();
 
-    socket.on('room-created', ({ code }) => {
+    // ── room-created: also fired on successful reconnect to lobby
+    socket.on('room-created', ({ code, token }) => {
       setCurrentRoom(code);
       setView('lobby');
+      // Save session so we can reconnect later
+      if (token) {
+        try {
+          const existing = JSON.parse(localStorage.getItem('sheriff_session') || '{}');
+          localStorage.setItem('sheriff_session', JSON.stringify({ ...existing, code, token }));
+        } catch (_) { }
+      }
+    });
+
+    // Joining player receives their personal token
+    socket.on('player-token', ({ token }) => {
+      try {
+        const existing = JSON.parse(localStorage.getItem('sheriff_session') || '{}');
+        localStorage.setItem('sheriff_session', JSON.stringify({ ...existing, token }));
+      } catch (_) { }
     });
 
     socket.on('player-joined', ({ players, code }) => {
@@ -57,21 +78,66 @@ export default function Home() {
     socket.on('game-state-updated', (state) => {
       setGameState(state);
       setPlayers(state.players);
-      if (state.phase) {
-        setView('game');
-      }
+      if (state.phase) setView('game');
     });
 
     socket.on('error', (msg) => {
       alert(msg);
     });
 
+    socket.on('you-were-kicked', () => {
+      alert('คุณถูกเจ้าของห้องเตะออกจากห้อง!');
+      clearSession();
+      setCurrentRoom(null);
+      setPlayers([]);
+      setGameState(null);
+      setView('menu');
+    });
+
+    socket.on('left-room', () => {
+      clearSession();
+      setCurrentRoom(null);
+      setPlayers([]);
+      setGameState(null);
+      setView('menu');
+    });
+
+    // Room was dissolved by host
+    socket.on('room-dissolved', (reason) => {
+      clearSession();
+      alert(reason || 'ห้องถูกยุบแล้ว');
+      setCurrentRoom(null);
+      setPlayers([]);
+      setGameState(null);
+      setView('menu');
+    });
+
+    // Reconnect failed (room gone / token invalid)
+    socket.on('reconnect-failed', (reason) => {
+      clearSession();
+      alert(`เชื่อมต่อใหม่ไม่สำเร็จ: ${reason}`);
+      setView('menu');
+    });
+
+    // ── Auto-reconnect on first mount if session exists
+    try {
+      const session = JSON.parse(localStorage.getItem('sheriff_session') || 'null');
+      if (session?.code && session?.token) {
+        socket.emit('reconnect-game', { code: session.code, token: session.token });
+      }
+    } catch (_) { }
+
     return () => {
       socket.off('room-created');
+      socket.off('player-token');
       socket.off('player-joined');
       socket.off('game-started');
       socket.off('game-state-updated');
       socket.off('error');
+      socket.off('you-were-kicked');
+      socket.off('left-room');
+      socket.off('room-dissolved');
+      socket.off('reconnect-failed');
     };
   }, []);
 
@@ -104,17 +170,33 @@ export default function Home() {
   }, [gameState?.phase]);
 
   const handleCreateRoom = () => {
-    if (!name) return alert('Please enter your name');
+    if (!name) return alert('กรุณาใส่ชื่อของคุณ');
+    // Save name+avatar before creating so reconnect can restore them
+    try { localStorage.setItem('sheriff_session', JSON.stringify({ name, avatar })); } catch (_) { }
     socket.emit('create-room', { name, avatar });
   };
 
   const handleJoinRoom = () => {
-    if (!name || !roomCode) return alert('Please enter name and room code');
+    if (!name || !roomCode) return alert('กรุณาใส่ชื่อและรหัสห้อง');
+    try { localStorage.setItem('sheriff_session', JSON.stringify({ name, avatar, code: roomCode })); } catch (_) { }
     socket.emit('join-room', { name, avatar, code: roomCode });
   };
 
   const handleStartGame = () => {
     socket.emit('start-game', { code: currentRoom });
+  };
+
+  const handleKickPlayer = (targetId) => {
+    if (confirm('ยืนยันการเตะผู้เล่นนี้ออกจากห้อง?')) {
+      socket.emit('kick-player', { code: currentRoom, targetId });
+    }
+  };
+
+  const handleLeaveRoom = () => {
+    if (confirm('ต้องการออกจากห้องนี้ใช่หรือไม่?')) {
+      clearSession();
+      socket.emit('leave-room', { code: currentRoom });
+    }
   };
 
   const toggleCardSelection = (idx) => {
@@ -277,14 +359,45 @@ export default function Home() {
               <div style={{ textAlign: 'left', marginBottom: '30px' }}>
                 <h3 style={{ fontSize: '1rem', color: 'var(--foreground)', opacity: 0.8, marginBottom: '15px' }}>ผู้เล่น ({players.length}/6)</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {players.map((p, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(0,0,0,0.05)', padding: '10px', borderRadius: '8px' }}>
-                      <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem', border: '2px solid var(--primary)', boxShadow: '0 2px 5px rgba(0,0,0,0.1)' }}>
-                        {p.avatar || '👤'}
+                  {players.map((p, i) => {
+                    const isHost = players[0]?.id === socket.id;
+                    const isMe = p.id === socket.id;
+                    const isPlayerHost = p.id === players[0]?.id;
+                    return (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: isMe ? 'rgba(212,175,55,0.1)' : 'rgba(0,0,0,0.05)', padding: '10px', borderRadius: '8px', border: isMe ? '1px solid rgba(212,175,55,0.3)' : '1px solid transparent' }}>
+                        <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem', border: '2px solid var(--primary)', boxShadow: '0 2px 5px rgba(0,0,0,0.1)', flexShrink: 0 }}>
+                          {p.avatar || '👤'}
+                        </div>
+                        <span style={{ fontWeight: '600', color: 'var(--foreground)', flex: 1 }}>
+                          {p.name} {isMe ? '(คุณ)' : ''} {isPlayerHost ? '👑' : ''}
+                        </span>
+                        {/* Kick button: only host sees it, and only on other players */}
+                        {isHost && !isMe && (
+                          <button
+                            onClick={() => handleKickPlayer(p.id)}
+                            style={{
+                              padding: '5px 12px',
+                              background: 'rgba(211, 47, 47, 0.1)',
+                              color: 'var(--accent)',
+                              border: '1px solid rgba(211,47,47,0.3)',
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              fontSize: '0.8rem',
+                              fontWeight: 'bold',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              transition: '0.2s'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(211,47,47,0.2)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'rgba(211,47,47,0.1)'}
+                          >
+                            🚫 เตะออก
+                          </button>
+                        )}
                       </div>
-                      <span style={{ fontWeight: '600', color: 'var(--foreground)' }}>{p.name} {p.id === socket.id ? '(คุณ)' : ''}</span>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {players.length < 2 && (
                     <p style={{ fontSize: '0.8rem', color: '#666', fontStyle: 'italic', marginTop: '10px' }}>รอผู้เล่นคนอื่น...</p>
                   )}
@@ -298,6 +411,32 @@ export default function Home() {
               <p style={{ marginTop: '20px', fontSize: '0.8rem', color: '#555' }}>
                 แชร์รหัสให้เพื่อนเข้าร่วม
               </p>
+
+              {/* Leave Room button — visible to all players */}
+              <button
+                onClick={handleLeaveRoom}
+                style={{
+                  marginTop: '16px',
+                  width: '100%',
+                  padding: '10px',
+                  background: 'rgba(211, 47, 47, 0.07)',
+                  color: 'var(--accent)',
+                  border: '1px solid rgba(211,47,47,0.25)',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '0.95rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  transition: '0.2s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(211,47,47,0.15)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'rgba(211,47,47,0.07)'}
+              >
+                🚪 ออกจากห้อง
+              </button>
             </motion.div>
           )}
           {view === 'game' && gameState && (
@@ -690,8 +829,9 @@ export default function Home() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
                       {players.map(p => {
                         const isSheriff = p.id === gameState.sheriffId;
+                        const isDisconnected = p.disconnected;
                         return (
-                          <div key={p.id} style={{ display: 'flex', flexDirection: 'column', padding: '15px', background: 'rgba(0,0,0,0.05)', borderRadius: '10px', borderLeft: isSheriff ? '4px solid var(--primary)' : '4px solid transparent' }}>
+                          <div key={p.id} style={{ display: 'flex', flexDirection: 'column', padding: '15px', background: isDisconnected ? 'rgba(100,100,100,0.08)' : 'rgba(0,0,0,0.05)', borderRadius: '10px', borderLeft: isSheriff ? '4px solid var(--primary)' : isDisconnected ? '4px solid #999' : '4px solid transparent', opacity: isDisconnected ? 0.7 : 1, transition: '0.3s' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
@@ -704,13 +844,22 @@ export default function Home() {
                                       👑
                                     </motion.div>
                                   )}
-                                  <div style={{ fontSize: '2.5rem', position: 'relative', zIndex: 2 }}>{p.avatar || '👤'}</div>
+                                  <div style={{ fontSize: '2.5rem', position: 'relative', zIndex: 2, filter: isDisconnected ? 'grayscale(1)' : 'none' }}>{p.avatar || '👤'}</div>
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                  <span style={{ fontWeight: 'bold', fontSize: '1.2rem', color: isSheriff ? 'var(--primary)' : 'var(--foreground)' }}>
+                                  <span style={{ fontWeight: 'bold', fontSize: '1.2rem', color: isSheriff ? 'var(--primary)' : isDisconnected ? '#999' : 'var(--foreground)' }}>
                                     {p.name} {p.id === socket.id ? '(คุณ)' : ''}
                                   </span>
                                   {isSheriff && <span style={{ fontSize: '0.8rem', background: 'var(--primary)', color: '#fff', padding: '2px 8px', borderRadius: '12px', width: 'fit-content', marginTop: '2px', fontWeight: 'bold', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>นายอำเภอ (Sheriff)</span>}
+                                  {isDisconnected && (
+                                    <motion.span
+                                      animate={{ opacity: [1, 0.3, 1] }}
+                                      transition={{ repeat: Infinity, duration: 1.4 }}
+                                      style={{ fontSize: '0.75rem', color: '#e67e22', fontWeight: 'bold', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                    >
+                                      📡 รอ {p.name} เชื่อมต่ออีกครั้ง...
+                                    </motion.span>
+                                  )}
                                 </div>
                               </div>
                               <span style={{ color: 'var(--primary)', display: 'flex', gap: '4px', alignItems: 'center', fontSize: '1.2rem', fontWeight: 'bold' }}>
